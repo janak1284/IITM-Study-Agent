@@ -1,0 +1,7 @@
+playwright==1.44.0
+browser-use
+langchain-groq
+python-dotenv
+flask
+pytz
+requests

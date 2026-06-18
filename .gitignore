@@ -1,0 +1,23 @@
+# Virtual environment
+venv/
+env/
+.env
+
+# Cache and temporary files
+__pycache__/
+*.pyc
+
+# Local data and output folders
+summaries/
+transcripts/
+debug/
+archive/
+
+# Data files
+curriculum_extracted.json
+weekly_study_schedule.json
+course_api_response.json
+deadlines.db
+
+# Output artifacts
+weekly_study_schedule.md
