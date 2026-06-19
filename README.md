@@ -77,4 +77,7 @@ playwright install chromium
 3. Set it to trigger at **11:00 PM on Sundays**.
 4. Check **"Wake the computer to run this task"** under the Conditions tab.
 
+
+
+MIT LICENSE Copyright (c) 2026 Janak
 ---

@@ -58,20 +58,10 @@ def trigger_check():
         today_str = now.strftime("%Y-%m-%d")
         query_payload = {
             "filter": {
-                "and": [
-                    {
-                        "property": "Type",
-                        "select": {
-                            "equals": "Lecture"
-                        }
-                    },
-                    {
-                        "property": "Scheduled Date",
-                        "date": {
-                            "equals": today_str
-                        }
-                    }
-                ]
+                "property": "Scheduled Date",
+                "date": {
+                    "equals": today_str
+                }
             }
         }
         resp = requests.post(f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query", headers=NOTION_HEADERS, json=query_payload)
@@ -80,7 +70,7 @@ def trigger_check():
             tasks_today = []
             for r in results:
                 props = r.get("properties", {})
-                title = props.get("Name", {}).get("title", [{}])[0].get("text", {}).get("content", "Unknown")
+                title = props.get("Title", {}).get("title", [{}])[0].get("text", {}).get("content", "Unknown")
                 subject = props.get("Subject", {}).get("select", {}).get("name", "Unknown")
                 tasks_today.append(f"- **{subject}**: {title}")
                 
@@ -118,25 +108,26 @@ def trigger_check():
         for r in results:
             page_id = r["id"]
             props = r.get("properties", {})
-            title = props.get("Name", {}).get("title", [{}])[0].get("text", {}).get("content", "Unknown")
+            title = props.get("Title", {}).get("title", [{}])[0].get("text", {}).get("content", "Unknown")
             subject = props.get("Subject", {}).get("select", {}).get("name", "Unknown")
-            url = props.get("Link", {}).get("url", "No Link")
+            url = props.get("URL", {}).get("url", "No Link")
             
             # Due Date parsing
-            date_prop = props.get("Due Date", {}).get("date")
-            if not date_prop:
+            due_date_rich_text = props.get("Due Date", {}).get("rich_text", [])
+            if not due_date_rich_text:
                 continue
-            due_date_str = date_prop.get("start")
+            due_date_str = due_date_rich_text[0].get("text", {}).get("content")
             if not due_date_str:
                 continue
                 
             try:
-                # Notion returns dates as ISO 8601 strings. 
-                # Replace Z with +00:00 for python fromisoformat
-                due_date = datetime.datetime.fromisoformat(due_date_str.replace("Z", "+00:00"))
-                if due_date.tzinfo is None:
-                    # If naive (e.g. no time provided), assume 23:59:59 IST
-                    due_date = IST.localize(due_date.replace(hour=23, minute=59, second=59))
+                import re
+                match = re.search(r"([A-Z][a-z]+ \d{1,2}, \d{4} \d{1,2}:\d{2} [AP]M)", due_date_str)
+                if match:
+                    due_date = datetime.datetime.strptime(match.group(1), "%b %d, %Y %I:%M %p")
+                    due_date = IST.localize(due_date)
+                else:
+                    continue
             except ValueError:
                 continue
                 
