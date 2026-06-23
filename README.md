@@ -12,6 +12,7 @@ This hybrid-cloud architecture automates curriculum extraction, downloads supple
 * **Intelligent Curriculum Extractor:** Bypasses Angular DOM elements to intercept raw network requests, filtering out non-essential reading materials and extracting only the true video lectures and graded assignments.
 * **Map-Reduce Llama 3 Summarizer:** Uses Groq's high-speed API to process dense, auto-generated YouTube transcripts and PDF slides. It translates Hinglish to technical English, breaks text into manageable chunks, and forces a final "Reduce" pass to build beautiful, highly-scannable Markdown files without hallucinated headers or fake assignments.
 * **Deterministic LLM Scheduler:** Automatically assigns every single lecture and assignment evenly across a 7-day study week, catching any AI hallucinations with a hardcoded Python fallback to guarantee no deadline is ever dropped.
+* **Smart Schedule Rebalancer:** A context-aware algorithm built into the Telegram bot that automatically redistributes your incomplete Notion backlog. It parses string titles to preserve lecture sequence (e.g. L1.1 before L1.2), dynamically interleaves subjects to prevent burnout, enforces a strict daily workload cap (e.g. 4 tasks/day), and actively protects assignment deadlines.
 * **Notion Dashboard Sync:** Binds everything into a centralized, mobile-friendly Notion Board View. Automatically tracks completion status (Not Started, In Progress, Completed) and scheduled dates.
 * **Serverless Telegram Webhook:** A 24/7 cloud-hosted Telegram bot that sends an `08:00 AM` Tactical Brief of your daily tasks, and evaluates an active Escalation Matrix to warn you `48`, `24`, and `6` hours before a deadline strikes.
 * **100% Free Stack:** Designed under strict constraints to utilize absolutely zero paid services (Groq Free Tier, PythonAnywhere Free Tier, Notion Free Tier, Telegram Free API).
@@ -32,7 +33,7 @@ The pipeline uses a **Hybrid-Cloud Execution Model**:
 * **Phase 2: Curriculum Extraction** - Dynamically extracts the weekly syllabus, Google Drive folders, and assignment portals.
 * **Phase 3: Deep AI Summarization** - Converts PyMuPDF streams and YouTube Captions into pristine `.md` Obsidian notes.
 * **Phase 4: Notion & Obsidian Sync** - Pushes the dynamically generated JSON study schedule to your cloud Notion workspace.
-* **Phase 5: Cloud Telegram Bot** - Evaluates deadlines and pings your mobile device contextually.
+* **Phase 5: Cloud Telegram Bot** - Evaluates deadlines, intelligently re-balances your overdue tasks across upcoming days, and pings your mobile device contextually.
 * **Phase 6: Sleep Orchestrator** - Triggered by Windows Task Scheduler, this wrapper executes the pipeline and physically hibernates the hardware.
 
 ---

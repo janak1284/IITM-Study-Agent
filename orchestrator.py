@@ -8,7 +8,6 @@ def run_pipeline():
     print(f"\n[{datetime.datetime.now()}] === Starting Weekly IITM Sync Pipeline ===")
     
     scripts = [
-        "phase1_login.py",
         "phase2_extractor.py",
         "phase3_transcripts.py",
         "phase4_schedule_builder.py",

@@ -99,7 +99,7 @@ async def main():
                                             if "Activity Question" not in title and "Not Graded" not in title:
                                                 lectures.append({"title": title, "url": url})
                                                 
-                                    elif "Graded Assignment" in title and "Not Graded" not in title:
+                                    elif child.get("type") == "A" and "Graded" in title and "Not Graded" not in title:
                                         graded_assignments.append({
                                             "title": title,
                                             "due_date": "Check Portal", 
