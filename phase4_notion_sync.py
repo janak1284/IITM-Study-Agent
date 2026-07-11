@@ -33,7 +33,8 @@ def get_existing_pages():
         resp = requests.post(
             f"https://api.notion.com/v1/databases/{database_id}/query",
             headers=headers,
-            json=payload
+            json=payload,
+            timeout=15
         )
         if resp.status_code != 200:
             print("Error querying database:", resp.text)

@@ -23,6 +23,9 @@ NOTION_HEADERS = {
     "Notion-Version": "2022-06-28"
 }
 
+session = requests.Session()
+session.headers.update(NOTION_HEADERS)
+
 IST = pytz.timezone('Asia/Kolkata')
 
 def send_telegram_message(message):
@@ -33,7 +36,7 @@ def send_telegram_message(message):
             "text": message,
             "parse_mode": "Markdown"
         }
-        requests.post(url, json=payload)
+        requests.post(url, json=payload, timeout=10)
     except Exception as e:
         print(f"Failed to send Telegram message: {e}")
 
@@ -46,10 +49,15 @@ def update_notion_alert_level(page_id, level):
             }
         }
     }
-    requests.patch(url, headers=NOTION_HEADERS, json=payload)
+    try:
+        session.patch(url, json=payload, timeout=10)
+    except Exception as e:
+        print(f"Failed to update alert level for {page_id}: {e}")
 
 @app.route('/trigger-check', methods=['GET'])
 def trigger_check():
+    import time
+    import re
     now = datetime.datetime.now(IST)
     today_str = now.strftime("%Y-%m-%d")
     logs = []
@@ -72,7 +80,12 @@ def trigger_check():
         if next_cursor:
             query_payload["start_cursor"] = next_cursor
             
-        resp = requests.post(f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query", headers=NOTION_HEADERS, json=query_payload)
+        try:
+            resp = session.post(f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query", json=query_payload, timeout=15)
+        except Exception as e:
+            logs.append(f"Notion query exception for task fetching: {e}")
+            break
+            
         if resp.status_code == 200:
             data = resp.json()
             results = data.get("results", [])
@@ -113,7 +126,6 @@ def trigger_check():
             break
             
     if incomplete_tasks:
-        import re
         def natural_sort_key(s):
             if not s:
                 return []
@@ -138,10 +150,11 @@ def trigger_check():
         MAX_PER_DAY = 4
         round_robin_idx = 0
         reassigned_count = 0
+        MAX_PATCHES_PER_RUN = 10 # Batch limit to ensure /trigger-check never exceeds web worker timeouts right at midnight (12:00 AM) when date boundaries shift
         
         while True:
-            # Check if all subjects are empty
-            if all(len(subjects_tasks[subj]) == 0 for subj in subject_keys):
+            # Check if all subjects are empty or batch update cap reached
+            if all(len(subjects_tasks[subj]) == 0 for subj in subject_keys) or reassigned_count >= MAX_PATCHES_PER_RUN:
                 break
                 
             subj = subject_keys[round_robin_idx % len(subject_keys)]
@@ -183,8 +196,18 @@ def trigger_check():
                     }
                 }
                 update_url = f"https://api.notion.com/v1/pages/{task['id']}"
-                requests.patch(update_url, headers=NOTION_HEADERS, json=update_payload)
-                reassigned_count += 1
+                try:
+                    time.sleep(0.3) # Rate limit protection for Notion API
+                    patch_resp = session.patch(update_url, json=update_payload, timeout=10)
+                    if patch_resp.status_code == 429:
+                        time.sleep(2.0)
+                        patch_resp = session.patch(update_url, json=update_payload, timeout=10)
+                    if patch_resp.status_code == 200:
+                        reassigned_count += 1
+                    else:
+                        logs.append(f"Failed to patch {task['title']}: {patch_resp.status_code}")
+                except Exception as e:
+                    logs.append(f"Exception patching {task['title']}: {e}")
                 
         if reassigned_count > 0:
             logs.append(f"Smartly re-assigned {reassigned_count} incomplete tasks starting from {current_date}.")
@@ -199,24 +222,27 @@ def trigger_check():
                 }
             }
         }
-        resp = requests.post(f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query", headers=NOTION_HEADERS, json=query_payload)
-        if resp.status_code == 200:
-            results = resp.json().get("results", [])
-            tasks_today = []
-            for r in results:
-                props = r.get("properties", {})
-                title = props.get("Title", {}).get("title", [{}])[0].get("text", {}).get("content", "Unknown")
-                subject = props.get("Subject", {}).get("select", {}).get("name", "Unknown")
-                tasks_today.append(f"- **{subject}**: {title}")
-                
-            if tasks_today:
-                payload = "☕ *08:00 AM Tactical Brief:*\n\n" + "\n".join(tasks_today)
-                send_telegram_message(payload)
-                logs.append("Daily briefing sent.")
+        try:
+            resp = session.post(f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query", json=query_payload, timeout=15)
+            if resp.status_code == 200:
+                results = resp.json().get("results", [])
+                tasks_today = []
+                for r in results:
+                    props = r.get("properties", {})
+                    title = props.get("Title", {}).get("title", [{}])[0].get("text", {}).get("content", "Unknown")
+                    subject = props.get("Subject", {}).get("select", {}).get("name", "Unknown")
+                    tasks_today.append(f"- **{subject}**: {title}")
+                    
+                if tasks_today:
+                    payload = "☕ *08:00 AM Tactical Brief:*\n\n" + "\n".join(tasks_today)
+                    send_telegram_message(payload)
+                    logs.append("Daily briefing sent.")
+                else:
+                    logs.append("No tasks scheduled for today.")
             else:
-                logs.append("No tasks scheduled for today.")
-        else:
-            logs.append(f"Notion query failed for briefing: {resp.text}")
+                logs.append(f"Notion query failed for briefing: {resp.text}")
+        except Exception as e:
+            logs.append(f"Exception querying briefing: {e}")
 
     # 2. Escalation Matrix for Assignments
     query_payload = {
@@ -237,66 +263,69 @@ def trigger_check():
             ]
         }
     }
-    resp = requests.post(f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query", headers=NOTION_HEADERS, json=query_payload)
-    if resp.status_code == 200:
-        results = resp.json().get("results", [])
-        for r in results:
-            page_id = r["id"]
-            props = r.get("properties", {})
-            title = props.get("Title", {}).get("title", [{}])[0].get("text", {}).get("content", "Unknown")
-            subject = props.get("Subject", {}).get("select", {}).get("name", "Unknown")
-            url = props.get("URL", {}).get("url", "No Link")
-            
-            # Due Date parsing
-            due_date_rich_text = props.get("Due Date", {}).get("rich_text", [])
-            if not due_date_rich_text:
-                continue
-            due_date_str = due_date_rich_text[0].get("text", {}).get("content")
-            if not due_date_str:
-                continue
+    try:
+        resp = session.post(f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query", json=query_payload, timeout=15)
+        if resp.status_code == 200:
+            results = resp.json().get("results", [])
+            for r in results:
+                page_id = r["id"]
+                props = r.get("properties", {})
+                title = props.get("Title", {}).get("title", [{}])[0].get("text", {}).get("content", "Unknown")
+                subject = props.get("Subject", {}).get("select", {}).get("name", "Unknown")
+                url = props.get("URL", {}).get("url", "No Link")
                 
-            try:
-                import re
-                match = re.search(r"([A-Z][a-z]+ \d{1,2}, \d{4} \d{1,2}:\d{2} [AP]M)", due_date_str)
-                if match:
-                    due_date = datetime.datetime.strptime(match.group(1), "%b %d, %Y %I:%M %p")
-                    due_date = IST.localize(due_date)
-                else:
+                # Due Date parsing
+                due_date_rich_text = props.get("Due Date", {}).get("rich_text", [])
+                if not due_date_rich_text:
                     continue
-            except ValueError:
-                continue
+                due_date_str = due_date_rich_text[0].get("text", {}).get("content")
+                if not due_date_str:
+                    continue
+                    
+                try:
+                    import re
+                    match = re.search(r"([A-Z][a-z]+ \d{1,2}, \d{4} \d{1,2}:\d{2} [AP]M)", due_date_str)
+                    if match:
+                        due_date = datetime.datetime.strptime(match.group(1), "%b %d, %Y %I:%M %p")
+                        due_date = IST.localize(due_date)
+                    else:
+                        continue
+                except ValueError:
+                    continue
+                    
+                alert_level = props.get("Alert_Level", {}).get("number")
+                if alert_level is None:
+                    alert_level = 0
                 
-            alert_level = props.get("Alert_Level", {}).get("number")
-            if alert_level is None:
-                alert_level = 0
-            
-            time_diff = due_date - now
-            hours_left = time_diff.total_seconds() / 3600
-            
-            # Don't alert if deadline has passed
-            if hours_left < 0:
-                continue
+                time_diff = due_date - now
+                hours_left = time_diff.total_seconds() / 3600
                 
-            new_alert_level = alert_level
-            payload = None
-            
-            if hours_left <= 6 and alert_level < 3:
-                payload = f"🚨 *CRITICAL DEADLINE (6 HOURS)* 🚨\n\n*{subject}*: {title}\nDue: {due_date.strftime('%b %d, %Y %I:%M %p')}\n[Portal Link]({url})"
-                new_alert_level = 3
-            elif hours_left <= 24 and alert_level < 2:
-                payload = f"⚠️ *24 HOUR WARNING* ⚠️\n\n*{subject}*: {title}\nDue: {due_date.strftime('%b %d, %Y %I:%M %p')}\n[Portal Link]({url})"
-                new_alert_level = 2
-            elif hours_left <= 48 and alert_level < 1:
-                payload = f"⏳ *48 HOUR NOTICE* ⏳\n\n*{subject}*: {title}\nDue: {due_date.strftime('%b %d, %Y %I:%M %p')}\n[Portal Link]({url})"
-                new_alert_level = 1
+                # Don't alert if deadline has passed
+                if hours_left < 0:
+                    continue
+                    
+                new_alert_level = alert_level
+                payload = None
                 
-            if payload:
-                send_telegram_message(payload)
-                update_notion_alert_level(page_id, new_alert_level)
-                logs.append(f"Sent alert level {new_alert_level} for {title}")
-                
-    else:
-        logs.append(f"Notion query failed for assignments: {resp.text}")
+                if hours_left <= 6 and alert_level < 3:
+                    payload = f"🚨 *CRITICAL DEADLINE (6 HOURS)* 🚨\n\n*{subject}*: {title}\nDue: {due_date.strftime('%b %d, %Y %I:%M %p')}\n[Portal Link]({url})"
+                    new_alert_level = 3
+                elif hours_left <= 24 and alert_level < 2:
+                    payload = f"⚠️ *24 HOUR WARNING* ⚠️\n\n*{subject}*: {title}\nDue: {due_date.strftime('%b %d, %Y %I:%M %p')}\n[Portal Link]({url})"
+                    new_alert_level = 2
+                elif hours_left <= 48 and alert_level < 1:
+                    payload = f"⏳ *48 HOUR NOTICE* ⏳\n\n*{subject}*: {title}\nDue: {due_date.strftime('%b %d, %Y %I:%M %p')}\n[Portal Link]({url})"
+                    new_alert_level = 1
+                    
+                if payload:
+                    send_telegram_message(payload)
+                    update_notion_alert_level(page_id, new_alert_level)
+                    logs.append(f"Sent alert level {new_alert_level} for {title}")
+                    
+        else:
+            logs.append(f"Notion query failed for assignments: {resp.text}")
+    except Exception as e:
+        logs.append(f"Exception querying assignments: {e}")
         
     return jsonify({"status": "success", "logs": logs, "timestamp": now.isoformat()}), 200
 

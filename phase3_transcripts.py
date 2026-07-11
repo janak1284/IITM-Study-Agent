@@ -58,7 +58,7 @@ def download_folder_files(folder_id, download_dir, depth=0):
                 elif mime_type == 'application/pdf':
                     file_path = os.path.join(download_dir, safe_name)
                     
-                    if os.path.exists(file_path):
+                    if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
                         print(f"{prefix}[Drive API] Skipping already downloaded: {file_name}")
                         continue
                         
@@ -245,7 +245,7 @@ def main():
                 is_youtube = False
                 source_name = ""
                 
-                if best_match_pdf and best_score > 80:
+                if best_match_pdf and best_score > 80 and os.path.getsize(best_match_pdf) > 0:
                     print(f"  [Match {best_score}%] '{title}' -> PDF: {best_match_pdf.name}")
                     source_name = best_match_pdf.name
                     try:
@@ -253,8 +253,13 @@ def main():
                         md_text = pymupdf4llm.to_markdown(str(best_match_pdf))
                     except Exception as e:
                         print(f"    [Error] PDF parsing failed for {best_match_pdf.name}: {e}")
-                else:
-                    print(f"  [Fallback to YouTube] No PDF found for: '{title}'. Fetching captions...")
+                        md_text = None
+
+                if not md_text:
+                    if best_match_pdf and best_score > 80:
+                        print(f"  [Fallback to YouTube] PDF empty or unparseable. Fetching captions for: '{title}'...")
+                    else:
+                        print(f"  [Fallback to YouTube] No PDF found for: '{title}'. Fetching captions...")
                     yt_id = extract_yt_id(url)
                     is_youtube = True
                     source_name = f"YouTube ({yt_id})"

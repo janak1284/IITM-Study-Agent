@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import sys
 # pyrefly: ignore [missing-import]
 from playwright.async_api import async_playwright
 
@@ -218,6 +219,7 @@ async def main():
                 
         except Exception as e:
             print(f"Extraction failed: {e}")
+            sys.exit(1)
 
 if __name__ == "__main__":
     asyncio.run(main())
