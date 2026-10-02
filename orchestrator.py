@@ -7,6 +7,15 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 def run_pipeline():
     print(f"\n[{datetime.datetime.now()}] === Starting Weekly IITM Sync Pipeline ===")
     
+    print("\n>>> Ensuring dependencies are installed (using ultra-fast uv)...")
+    try:
+        if not os.path.exists(".venv"):
+            subprocess.run(["uv", "venv"], check=True)
+        subprocess.run(["uv", "pip", "install", "-r", "requirements.txt"], check=True)
+    except Exception as e:
+        print(f">>> Failed to setup environment with uv: {e}")
+        return False
+        
     scripts = [
         "phase2_extractor.py",
         "phase3_transcripts.py",
@@ -14,13 +23,20 @@ def run_pipeline():
         "phase4_notion_sync.py"
     ]
     
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--user_id", type=str, help="The ID of the user executing the task")
+    args, unknown = parser.parse_known_args()
+    
     for script in scripts:
         print(f"\n>>> Running {script}...")
         try:
-            # We use the virtual environment's python if it exists, otherwise fallback to global
-            python_exec = ".\\venv\\Scripts\\python.exe" if os.path.exists(".\\venv\\Scripts\\python.exe") else "python"
-            
-            result = subprocess.run([python_exec, script], check=True)
+            # Run the script using the uv environment
+            cmd = ["uv", "run", script]
+            if args.user_id:
+                cmd.extend(["--user_id", args.user_id])
+                
+            result = subprocess.run(cmd, check=True)
             print(f">>> Successfully completed {script}")
         except subprocess.CalledProcessError as e:
             print(f">>> ERROR: {script} failed with exit code {e.returncode}")

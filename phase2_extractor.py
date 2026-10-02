@@ -1,11 +1,33 @@
 import asyncio
 import json
 import os
-import sys
+import argparse
+import sqlite3
 # pyrefly: ignore [missing-import]
 from playwright.async_api import async_playwright
 
+def get_save_path(user_id):
+    if not user_id: return "."
+    try:
+        conn = sqlite3.connect("app.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT local_save_path FROM user WHERE id = ?", (user_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if row: return row[0]
+    except Exception as e:
+        print(f"DB Error: {e}")
+    return "."
+
 async def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--user_id", type=str, default="")
+    args, _ = parser.parse_known_args()
+    
+    save_dir = get_save_path(args.user_id)
+    output_file = os.path.join(save_dir, "curriculum_extracted.json")
+    print(f"Output will be saved to: {output_file}")
+    
     print("Attaching to Chrome CDP session on 127.0.0.1:9222...")
     
     async with async_playwright() as p:
@@ -22,16 +44,17 @@ async def main():
             
             # Load existing cache to avoid re-scraping
             existing_cache = {}
-            if os.path.exists("curriculum_extracted.json"):
+            if os.path.exists(output_file):
                 try:
-                    with open("curriculum_extracted.json", "r", encoding="utf-8") as f:
+                    with open(output_file, "r", encoding="utf-8") as f:
                         data = json.load(f)
                         for subj in data.get("subjects", []):
                             existing_cache[subj["subject_name"]] = subj
                 except Exception:
                     pass
             
-            subjects_data = []
+            # Use dict to prevent duplicate subjects
+            subjects_dict = {}
             
             # Setup API interceptor
             course_responses = {}
@@ -74,7 +97,7 @@ async def main():
                         if ga.get("due_date") != "Check Portal":
                             cached_assignments[ga["title"]] = ga
                 
-                weeks = []
+                weeks_dict = {}
                 
                 def process_course_data(c_data):
                     if c_data and "outline" in c_data:
@@ -115,13 +138,24 @@ async def main():
                                 extract_unit_items(unit["children"])
                                 
                             if lectures or graded_assignments:
-                                weeks.append({
-                                    "week_name": unit_title,
-                                    "lectures": lectures,
-                                    "graded_assignments": graded_assignments
-                                })
+                                if unit_title not in weeks_dict:
+                                    weeks_dict[unit_title] = {
+                                        "week_name": unit_title,
+                                        "lectures": lectures,
+                                        "graded_assignments": graded_assignments
+                                    }
+                                else:
+                                    # Merge to prevent duplicates
+                                    existing_l = {l["title"]: l for l in weeks_dict[unit_title]["lectures"]}
+                                    for l in lectures: existing_l[l["title"]] = l
+                                    weeks_dict[unit_title]["lectures"] = list(existing_l.values())
+                                    
+                                    existing_g = {g["title"]: g for g in weeks_dict[unit_title]["graded_assignments"]}
+                                    for g in graded_assignments: existing_g[g["title"]] = g
+                                    weeks_dict[unit_title]["graded_assignments"] = list(existing_g.values())
 
                 process_course_data(course_data)
+                weeks = list(weeks_dict.values())
                 if not weeks:
                     print("  [Warning] API payload not captured or empty. Retrying...")
                     await page.reload(wait_until="networkidle")
@@ -203,19 +237,24 @@ async def main():
                 total_assignments = sum(len(w["graded_assignments"]) for w in weeks)
                 print(f"  Found {total_lectures} lectures, {total_assignments} assignments.")
                 
-                subjects_data.append({
+                subjects_dict[subject_name] = {
                     "subject_name": subject_name,
                     "drive_folder_url": drive_link or "Not Found",
                     "weeks": weeks,
                     "total_lecture_count": total_lectures
-                })
+                }
             
-            final_data = {"subjects": subjects_data}
+            # Merge with existing cache for subjects that weren't active this run
+            for k, v in existing_cache.items():
+                if k not in subjects_dict:
+                    subjects_dict[k] = v
+            
+            final_data = {"subjects": list(subjects_dict.values())}
             
             print("\n=== EXTRACTION COMPLETE ===")
-            with open("curriculum_extracted.json", "w", encoding="utf-8") as f:
+            with open(output_file, "w", encoding="utf-8") as f:
                 json.dump(final_data, f, indent=2)
-                print("Saved results to curriculum_extracted.json")
+                print(f"Saved results to {output_file}")
                 
         except Exception as e:
             print(f"Extraction failed: {e}")

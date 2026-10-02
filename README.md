@@ -71,6 +71,11 @@ playwright install chromium
 2. Upload `phase5_telegram_bot.py` and your `.env` file to your home directory.
 3. Edit the WSGI Configuration file to point to the Flask `app` object.
 4. Set up an external free pinging service (like `cron-job.org`) to hit `https://your-username.pythonanywhere.com/trigger-check` every 60 minutes.
+5. **Enable Two-Way Interactive AI Commands:** Run the following command once in your terminal to connect Telegram's webhook to your PythonAnywhere server:
+   ```bash
+   curl -F "url=https://your-username.pythonanywhere.com/webhook" https://api.telegram.org/bot<YOUR_TELEGRAM_BOT_TOKEN>/setWebhook
+   ```
+   Now you can use `/today`, `/done <keyword>`, `/snooze <keyword>`, `/summary <keyword>`, `/quiz <subject>`, and `/ask <question>` (AI Tutor) directly in Telegram!
 
 ### 4. Automate the Local Orchestrator
 1. Open Windows Task Scheduler.
