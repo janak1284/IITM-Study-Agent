@@ -2,6 +2,7 @@
 venv/
 env/
 .env
+.venv/
 
 # Cache and temporary files
 __pycache__/
@@ -12,12 +13,14 @@ summaries/
 transcripts/
 debug/
 archive/
+prompts_for_gemini/
 
 # Data files
 curriculum_extracted.json
 weekly_study_schedule.json
 course_api_response.json
 deadlines.db
+app.db
 
 # Output artifacts
 weekly_study_schedule.md
